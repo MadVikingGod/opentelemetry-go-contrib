@@ -6,7 +6,7 @@ replace go.opentelemetry.io/contrib => ../../../../..
 
 require (
 	github.com/aws/aws-lambda-go v1.29.0
-	github.com/stretchr/testify v1.7.1
+	github.com/stretchr/testify v1.7.2
 	go.opentelemetry.io/otel v1.6.3
 	go.opentelemetry.io/otel/trace v1.6.3
 )
