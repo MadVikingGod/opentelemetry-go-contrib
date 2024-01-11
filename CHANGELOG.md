@@ -18,6 +18,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Add `SDK.Shutdown` method in `"go.opentelemetry.io/contrib/config"`. (#4583)
 - `NewSDK` in `go.opentelemetry.io/contrib/config` now returns a configured SDK with a valid `TracerProvider`. (#4741)
+- `NewSDK` in `go.opentelemetry.io/contrib/config` now returns a configured SDK with a valid `MeterProvider`. (#)
 
 ### Changed
 
