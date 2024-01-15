@@ -6,13 +6,19 @@ package config
 import (
 	"context"
 	"errors"
+	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
@@ -75,5 +81,334 @@ func TestMeterProvider(t *testing.T) {
 		require.Equal(t, tt.wantProvider, mp)
 		assert.Equal(t, tt.wantErr, err)
 		require.NoError(t, shutdown(context.Background()))
+	}
+}
+
+func TestReader(t *testing.T) {
+	consoleExporter, err := stdoutmetric.New(
+		stdoutmetric.WithPrettyPrint(),
+	)
+	require.NoError(t, err)
+	ctx := context.Background()
+	otlpGRPCExporter, err := otlpmetricgrpc.New(ctx)
+	require.NoError(t, err)
+	otlpHTTPExporter, err := otlpmetrichttp.New(ctx)
+	require.NoError(t, err)
+	testCases := []struct {
+		name       string
+		reader     MetricReader
+		args       any
+		wantErr    error
+		wantReader sdkmetric.Reader
+	}{
+		{
+			name:    "no reader",
+			wantErr: errors.New("no valid metric reader"),
+		},
+		{
+			name: "periodic/otlp-grpc-exporter",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    "http://localhost:4318",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpGRPCExporter),
+		},
+		{
+			name: "periodic/otlp-grpc-exporter-with-path",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    "http://localhost:4318/path/123",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpGRPCExporter),
+		},
+		{
+			name: "periodic/otlp-grpc-exporter-no-endpoint",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpGRPCExporter),
+		},
+		{
+			name: "periodic/otlp-grpc-exporter-no-scheme",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpGRPCExporter),
+		},
+		{
+			name: "periodic/otlp-grpc-invalid-endpoint",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    " ",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantErr: &url.Error{Op: "parse", URL: " ", Err: errors.New("invalid URI for request")},
+		},
+		{
+			name: "periodic/grpc-http-none-compression",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("none"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpGRPCExporter),
+		},
+		{
+			name: "periodic/otlp-grpc-invalid-compression",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "grpc/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("invalid"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantErr: errors.New("unsupported compression \"invalid\""),
+		},
+		{
+			name: "periodic/otlp-http-exporter",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    "http://localhost:4318",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpHTTPExporter),
+		},
+		{
+			name: "periodic/otlp-http-exporter-with-path",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    "http://localhost:4318/path/123",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpHTTPExporter),
+		},
+		{
+			name: "periodic/otlp-http-exporter-no-endpoint",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpHTTPExporter),
+		},
+		{
+			name: "periodic/otlp-http-exporter-no-scheme",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpHTTPExporter),
+		},
+		{
+			name: "periodic/otlp-http-invalid-endpoint",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    " ",
+							Compression: ptr("gzip"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantErr: &url.Error{Op: "parse", URL: " ", Err: errors.New("invalid URI for request")},
+		},
+		{
+			name: "periodic/otlp-http-none-compression",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("none"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(otlpHTTPExporter),
+		},
+		{
+			name: "periodic/otlp-http-invalid-compression",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						OTLP: &OTLPMetric{
+							Protocol:    "http/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("invalid"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantErr: errors.New("unsupported compression \"invalid\""),
+		},
+		{
+			name: "periodic/no-exporter",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{},
+				},
+			},
+			wantErr: errors.New("no valid metric exporter"),
+		},
+		{
+			name: "periodic/console-exporter",
+			reader: MetricReader{
+				Periodic: &PeriodicMetricReader{
+					Exporter: MetricExporter{
+						Console: Console{},
+					},
+				},
+			},
+			wantReader: sdkmetric.NewPeriodicReader(consoleExporter),
+		},
+	}
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := metricReader(context.Background(), tt.reader)
+			require.Equal(t, tt.wantErr, err)
+			if tt.wantReader == nil {
+				require.Nil(t, got)
+			} else {
+				require.Equal(t, reflect.TypeOf(tt.wantReader), reflect.TypeOf(got))
+				var fieldName string
+				switch reflect.TypeOf(tt.wantReader).String() {
+				case "*metric.PeriodicReader":
+					fieldName = "exporter"
+				default:
+					fieldName = "e"
+				}
+				wantExporterType := reflect.Indirect(reflect.ValueOf(tt.wantReader)).FieldByName(fieldName).Elem().Type()
+				gotExporterType := reflect.Indirect(reflect.ValueOf(got)).FieldByName(fieldName).Elem().Type()
+				require.Equal(t, wantExporterType.String(), gotExporterType.String())
+			}
+		})
 	}
 }

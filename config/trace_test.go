@@ -445,6 +445,29 @@ func TestSpanProcessor(t *testing.T) {
 			wantErr: &url.Error{Op: "parse", URL: " ", Err: errors.New("invalid URI for request")},
 		},
 		{
+			name: "batch/otlp-http-none-compression",
+			processor: SpanProcessor{
+				Batch: &BatchSpanProcessor{
+					MaxExportBatchSize: ptr(0),
+					ExportTimeout:      ptr(0),
+					MaxQueueSize:       ptr(0),
+					ScheduleDelay:      ptr(0),
+					Exporter: SpanExporter{
+						OTLP: &OTLP{
+							Protocol:    "http/protobuf",
+							Endpoint:    "localhost:4318",
+							Compression: ptr("none"),
+							Timeout:     ptr(1000),
+							Headers: map[string]string{
+								"test": "test1",
+							},
+						},
+					},
+				},
+			},
+			wantProcessor: sdktrace.NewBatchSpanProcessor(otlpHTTPExporter),
+		},
+		{
 			name: "batch/otlp-http-invalid-compression",
 			processor: SpanProcessor{
 				Batch: &BatchSpanProcessor{
