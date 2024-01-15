@@ -15,6 +15,7 @@ import (
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
@@ -94,6 +95,8 @@ func TestReader(t *testing.T) {
 	require.NoError(t, err)
 	otlpHTTPExporter, err := otlpmetrichttp.New(ctx)
 	require.NoError(t, err)
+	promExporter, err := otelprom.New()
+	require.NoError(t, err)
 	testCases := []struct {
 		name       string
 		reader     MetricReader
@@ -104,6 +107,51 @@ func TestReader(t *testing.T) {
 		{
 			name:    "no reader",
 			wantErr: errors.New("no valid metric reader"),
+		},
+		{
+			name: "pull/no-exporter",
+			reader: MetricReader{
+				Pull: &PullMetricReader{},
+			},
+			wantErr: errors.New("no valid metric exporter"),
+		},
+		{
+			name: "pull/prometheus-no-host",
+			reader: MetricReader{
+				Pull: &PullMetricReader{
+					Exporter: MetricExporter{
+						Prometheus: &Prometheus{},
+					},
+				},
+			},
+			wantErr: errors.New("host must be specified"),
+		},
+		{
+			name: "pull/prometheus-no-port",
+			reader: MetricReader{
+				Pull: &PullMetricReader{
+					Exporter: MetricExporter{
+						Prometheus: &Prometheus{
+							Host: ptr("localhost"),
+						},
+					},
+				},
+			},
+			wantErr: errors.New("port must be specified"),
+		},
+		{
+			name: "pull/prometheus",
+			reader: MetricReader{
+				Pull: &PullMetricReader{
+					Exporter: MetricExporter{
+						Prometheus: &Prometheus{
+							Host: ptr("localhost"),
+							Port: ptr(8888),
+						},
+					},
+				},
+			},
+			wantReader: readerWithServer{promExporter, nil},
 		},
 		{
 			name: "periodic/otlp-grpc-exporter",
@@ -402,12 +450,15 @@ func TestReader(t *testing.T) {
 				switch reflect.TypeOf(tt.wantReader).String() {
 				case "*metric.PeriodicReader":
 					fieldName = "exporter"
+				case "config.readerWithServer":
+					fieldName = "Reader"
 				default:
 					fieldName = "e"
 				}
 				wantExporterType := reflect.Indirect(reflect.ValueOf(tt.wantReader)).FieldByName(fieldName).Elem().Type()
 				gotExporterType := reflect.Indirect(reflect.ValueOf(got)).FieldByName(fieldName).Elem().Type()
 				require.Equal(t, wantExporterType.String(), gotExporterType.String())
+				require.NoError(t, got.Shutdown(context.Background()))
 			}
 		})
 	}
