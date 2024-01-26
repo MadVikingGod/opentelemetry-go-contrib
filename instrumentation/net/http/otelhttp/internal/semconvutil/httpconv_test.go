@@ -161,6 +161,36 @@ func TestHTTPServerRequest(t *testing.T) {
 		HTTPServerRequest("", req))
 }
 
+var benchHTTPServerRequestResults []attribute.KeyValue
+
+func BenchmarkHTTPServerRequest(b *testing.B) {
+	// Request was generated from TestHTTPServerRequest request.
+	req := &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Path: "/",
+		},
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header: http.Header{
+			"User-Agent":      []string{"Go-http-client/1.1"},
+			"Accept-Encoding": []string{"gzip"},
+		},
+		Body:       http.NoBody,
+		Host:       "127.0.0.1:39093",
+		RemoteAddr: "127.0.0.1:38738",
+		RequestURI: "/",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+
+		benchHTTPServerRequestResults = HTTPServerRequest("", req)
+	}
+}
+
 func TestHTTPServerRequestMetrics(t *testing.T) {
 	got := make(chan *http.Request, 1)
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +222,35 @@ func TestHTTPServerRequestMetrics(t *testing.T) {
 			attribute.String("net.protocol.version", "1.1"),
 		},
 		HTTPServerRequestMetrics("", req))
+}
+
+var benchHTTPServerRequestMetricsResults []attribute.KeyValue
+
+func BenchmarkHTTPServerRequestMetrics(b *testing.B) {
+	// Request was generated from TestHTTPServerRequestMetrics request.
+	req := &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Path: "/",
+		},
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header: http.Header{
+			"User-Agent":      []string{"Go-http-client/1.1"},
+			"Accept-Encoding": []string{"gzip"},
+		},
+		Body:       http.NoBody,
+		Host:       "127.0.0.1:39093",
+		RemoteAddr: "127.0.0.1:38738",
+		RequestURI: "/",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchHTTPServerRequestMetricsResults = HTTPServerRequestMetrics("", req)
+	}
 }
 
 func TestHTTPServerName(t *testing.T) {

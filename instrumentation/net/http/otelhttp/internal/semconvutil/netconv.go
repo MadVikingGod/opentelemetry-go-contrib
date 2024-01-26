@@ -18,11 +18,13 @@ package semconvutil // import "go.opentelemetry.io/contrib/instrumentation/net/h
 
 import (
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
+	semconvNew "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
 // NetTransport returns a trace attribute describing the transport protocol of the
@@ -53,39 +55,53 @@ func NetServer(address string, ln net.Listener) []attribute.KeyValue {
 // netConv are the network semantic convention attributes defined for a version
 // of the OpenTelemetry specification.
 type netConv struct {
-	NetHostNameKey     attribute.Key
-	NetHostPortKey     attribute.Key
-	NetPeerNameKey     attribute.Key
-	NetPeerPortKey     attribute.Key
-	NetProtocolName    attribute.Key
-	NetProtocolVersion attribute.Key
-	NetSockFamilyKey   attribute.Key
-	NetSockPeerAddrKey attribute.Key
-	NetSockPeerPortKey attribute.Key
-	NetSockHostAddrKey attribute.Key
-	NetSockHostPortKey attribute.Key
-	NetTransportOther  attribute.KeyValue
-	NetTransportTCP    attribute.KeyValue
-	NetTransportUDP    attribute.KeyValue
-	NetTransportInProc attribute.KeyValue
+	NetHostNameKey            attribute.Key
+	ServerAddressKey          attribute.Key // This should be used for HostName in Compatibility mode
+	NetHostPortKey            attribute.Key
+	ServerPortKey             attribute.Key // This should be used for HostPort in Compatibility mode
+	NetPeerNameKey            attribute.Key
+	NetPeerPortKey            attribute.Key
+	NetProtocolName           attribute.Key
+	NetworkProtocolNameKey    attribute.Key // This should be used for ProtocolName in Compatibility mode
+	NetProtocolVersion        attribute.Key
+	NetworkProtoColVersionKey attribute.Key // This should be used for ProtocolVersion in Compatibility mode
+	NetSockFamilyKey          attribute.Key
+	NetSockPeerAddrKey        attribute.Key
+	NetSockPeerPortKey        attribute.Key
+	NetSockHostAddrKey        attribute.Key
+	ServerSocketAddrKey       attribute.Key // This should be used for SockHostAddr in Compatibility mode
+	NetSockHostPortKey        attribute.Key
+	ServerSocketPortKey       attribute.Key // This should be used for SockHostPort in Compatibility mode
+	NetTransportOther         attribute.KeyValue
+	NetTransportTCP           attribute.KeyValue
+	NetTransportUDP           attribute.KeyValue
+	NetTransportInProc        attribute.KeyValue
+
+	compatibility compatibilityMode
 }
 
 var nc = &netConv{
-	NetHostNameKey:     semconv.NetHostNameKey,
-	NetHostPortKey:     semconv.NetHostPortKey,
-	NetPeerNameKey:     semconv.NetPeerNameKey,
-	NetPeerPortKey:     semconv.NetPeerPortKey,
-	NetProtocolName:    semconv.NetProtocolNameKey,
-	NetProtocolVersion: semconv.NetProtocolVersionKey,
-	NetSockFamilyKey:   semconv.NetSockFamilyKey,
-	NetSockPeerAddrKey: semconv.NetSockPeerAddrKey,
-	NetSockPeerPortKey: semconv.NetSockPeerPortKey,
-	NetSockHostAddrKey: semconv.NetSockHostAddrKey,
-	NetSockHostPortKey: semconv.NetSockHostPortKey,
-	NetTransportOther:  semconv.NetTransportOther,
-	NetTransportTCP:    semconv.NetTransportTCP,
-	NetTransportUDP:    semconv.NetTransportUDP,
-	NetTransportInProc: semconv.NetTransportInProc,
+	NetHostNameKey:            semconv.NetHostNameKey,
+	ServerAddressKey:          semconvNew.ServerAddressKey,
+	NetHostPortKey:            semconv.NetHostPortKey,
+	ServerPortKey:             semconvNew.ServerPortKey,
+	NetPeerNameKey:            semconv.NetPeerNameKey,
+	NetPeerPortKey:            semconv.NetPeerPortKey,
+	NetProtocolName:           semconv.NetProtocolNameKey,
+	NetworkProtocolNameKey:    semconvNew.NetworkProtocolNameKey,
+	NetProtocolVersion:        semconv.NetProtocolVersionKey,
+	NetworkProtoColVersionKey: semconvNew.NetworkProtocolVersionKey,
+	NetSockFamilyKey:          semconv.NetSockFamilyKey,
+	NetSockPeerAddrKey:        semconv.NetSockPeerAddrKey,
+	NetSockPeerPortKey:        semconv.NetSockPeerPortKey,
+	NetSockHostAddrKey:        semconv.NetSockHostAddrKey,
+	NetSockHostPortKey:        semconv.NetSockHostPortKey,
+	NetTransportOther:         semconv.NetTransportOther,
+	NetTransportTCP:           semconv.NetTransportTCP,
+	NetTransportUDP:           semconv.NetTransportUDP,
+	NetTransportInProc:        semconv.NetTransportInProc,
+
+	compatibility: getCompatibilityMode(),
 }
 
 func (c *netConv) Transport(network string) attribute.KeyValue {
@@ -105,24 +121,21 @@ func (c *netConv) Transport(network string) attribute.KeyValue {
 // Host returns attributes for a network host address.
 func (c *netConv) Host(address string) []attribute.KeyValue {
 	h, p := splitHostPort(address)
-	var n int
-	if h != "" {
-		n++
-		if p > 0 {
-			n++
-		}
-	}
 
-	if n == 0 {
+	if h == "" && p <= 0 {
 		return nil
 	}
 
-	attrs := make([]attribute.KeyValue, 0, n)
-	attrs = append(attrs, c.HostName(h))
+	attrs := make([]attribute.KeyValue, 4)
+	i := c.HostName2(h, attrs)
+	attrs = attrs[:i]
 	if p > 0 {
 		attrs = append(attrs, c.HostPort(int(p)))
+		attrs[i] = c.HostPort(int(p))
+		i++
 	}
-	return attrs
+	// TODO: When we drop go1.20 support use slices.clip().
+	return attrs[:i:i]
 }
 
 // Server returns attributes for a network listener listening at address. See
@@ -145,34 +158,59 @@ func (c *netConv) Server(address string, ln net.Listener) []attribute.KeyValue {
 	network := lAddr.Network()
 	sockFamily := family(network, sockHostAddr)
 
-	n := nonZeroStr(hostName, network, sockHostAddr, sockFamily)
-	n += positiveInt(hostPort, sockHostPort)
-	attr := make([]attribute.KeyValue, 0, n)
+	const MaxAttributes = 8
+	var i int
+	attr := make([]attribute.KeyValue, MaxAttributes)
 	if hostName != "" {
-		attr = append(attr, c.HostName(hostName))
+		i += c.HostName2(hostName, attr[i:])
 		if hostPort > 0 {
 			// Only if net.host.name is set should net.host.port be.
-			attr = append(attr, c.HostPort(hostPort))
+			attr[i] = c.HostPort(hostPort)
+			i++
 		}
 	}
 	if network != "" {
-		attr = append(attr, c.Transport(network))
+		attr[i] = c.Transport(network)
+		i++
 	}
 	if sockFamily != "" {
-		attr = append(attr, c.NetSockFamilyKey.String(sockFamily))
+		attr[i] = c.NetSockFamilyKey.String(sockFamily)
+		i++
 	}
 	if sockHostAddr != "" {
-		attr = append(attr, c.NetSockHostAddrKey.String(sockHostAddr))
+		attr[i] = c.NetSockHostAddrKey.String(sockHostAddr)
+		i++
 		if sockHostPort > 0 {
 			// Only if net.sock.host.addr is set should net.sock.host.port be.
-			attr = append(attr, c.NetSockHostPortKey.Int(sockHostPort))
+			attr[i] = c.NetSockHostPortKey.Int(sockHostPort)
+			i++
 		}
 	}
-	return attr
+	// TODO: When we drop go1.20 support use slices.clip().
+	return attr[:i:i]
 }
 
-func (c *netConv) HostName(name string) attribute.KeyValue {
-	return c.NetHostNameKey.String(name)
+func (c *netConv) HostName(name string) []attribute.KeyValue {
+	switch c.compatibility {
+	case compatibilityHttp:
+		return []attribute.KeyValue{c.ServerAddressKey.String(name)}
+	case compatibilityDup:
+		return []attribute.KeyValue{c.NetHostNameKey.String(name), c.ServerAddressKey.String(name)}
+	default:
+		return []attribute.KeyValue{c.NetHostNameKey.String(name)}
+	}
+}
+func (c *netConv) HostName2(name string, dst []attribute.KeyValue) int {
+	switch c.compatibility {
+	case compatibilityHttp:
+		copy(dst, []attribute.KeyValue{c.ServerAddressKey.String(name)})
+	case compatibilityDup:
+		copy(dst, []attribute.KeyValue{c.NetHostNameKey.String(name), c.ServerAddressKey.String(name)})
+		return 2
+	default:
+		copy(dst, []attribute.KeyValue{c.NetHostNameKey.String(name)})
+	}
+	return 1
 }
 
 func (c *netConv) HostPort(port int) attribute.KeyValue {
@@ -225,9 +263,7 @@ func (c *netConv) Client(address string, conn net.Conn) []attribute.KeyValue {
 		sockFamily = family(network, sockPeerAddr)
 	}
 
-	n := nonZeroStr(peerName, network, sockPeerAddr, sockHostAddr, sockFamily)
-	n += positiveInt(peerPort, sockPeerPort, sockHostPort)
-	attr := make([]attribute.KeyValue, 0, n)
+	attr := make([]attribute.KeyValue, 0, 8)
 	if peerName != "" {
 		attr = append(attr, c.PeerName(peerName))
 		if peerPort > 0 {
@@ -255,7 +291,7 @@ func (c *netConv) Client(address string, conn net.Conn) []attribute.KeyValue {
 			attr = append(attr, c.NetSockHostPortKey.Int(sockHostPort))
 		}
 	}
-	return attr
+	return slices.Clip(attr)
 }
 
 func family(network, address string) string {

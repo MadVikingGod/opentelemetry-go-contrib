@@ -90,7 +90,7 @@ func TestNetServerTCP(t *testing.T) {
 
 	got := NetServer("example.com:8080", ln)
 	expected := []attribute.KeyValue{
-		nc.HostName("example.com"),
+		nc.NetHostNameKey.String("example.com"),
 		nc.HostPort(8080),
 		nc.NetTransportTCP,
 		nc.NetSockFamilyKey.String("inet"),
@@ -104,18 +104,16 @@ func TestNetServerTCP(t *testing.T) {
 func TestNetHost(t *testing.T) {
 	testAddrs(t, []addrTest{
 		{address: "", expected: nil},
-		{address: "192.0.0.1", expected: []attribute.KeyValue{
-			nc.HostName("192.0.0.1"),
-		}},
-		{address: "192.0.0.1:9090", expected: []attribute.KeyValue{
+		{address: "192.0.0.1", expected: nc.HostName("192.0.0.1")},
+		{address: "192.0.0.1:9090", expected: append(
 			nc.HostName("192.0.0.1"),
 			nc.HostPort(9090),
-		}},
+		)},
 	}, nc.Host)
 }
 
 func TestNetHostName(t *testing.T) {
-	expected := attribute.Key("net.host.name").String(addr)
+	expected := []attribute.KeyValue{attribute.Key("net.host.name").String(addr)}
 	assert.Equal(t, expected, nc.HostName(addr))
 }
 
@@ -219,6 +217,23 @@ func TestNetClientTCPNilLocal(t *testing.T) {
 	}
 	assert.Equal(t, cap(expected), cap(got), "slice capacity")
 	assert.ElementsMatch(t, expected, got)
+}
+
+var benchNetServerAttr []attribute.KeyValue
+
+func BenchmarkNetClientTCPNilLocal(b *testing.B) {
+	b.ReportAllocs()
+
+	conn, ln, err := newTCPConn()
+	require.NoError(b, err)
+	defer func() { require.NoError(b, ln.Close()) }()
+	defer func() { require.NoError(b, conn.Close()) }()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchNetServerAttr = NetClient("example.com:8080", conn)
+	}
+
 }
 
 func TestNetPeer(t *testing.T) {
