@@ -312,8 +312,9 @@ func (c *httpConv) ServerRequest(server string, req *http.Request) []attribute.K
 	http.method             string
 	http.scheme             string
 	net.host.name           string Note: not in http compatibility mode.
-	network.host.name       string Note: only if in http or http/dup compatibility mode.
-	net.host.port           int
+	server.address          string Note: only if in http or http/dup compatibility mode.
+	net.host.port           int    Note: not in http compatibility mode.
+	server.port             int    Note: only if in http or http/dup compatibility mode.
 	net.sock.peer.addr      string
 	net.sock.peer.port      int
 	user_agent.original     string
@@ -347,16 +348,14 @@ func (c *httpConv) ServerRequest(server string, req *http.Request) []attribute.K
 
 	const MaxAttributes = 12
 	attrs := make([]attribute.KeyValue, MaxAttributes)
-	i := c.NetConv.HostName2(host, attrs)
+	i := c.NetConv.HostName(host, attrs)
 	attrs[i] = c.method(req.Method)
 	i++
 	attrs[i] = c.scheme(req.TLS != nil)
 	i++
-	// attrs = append(attrs, c.NetConv.HostName(host)...)
 
 	if hostPort := requiredHTTPPort(req.TLS != nil, p); hostPort > 0 {
-		attrs[i] = c.NetConv.HostPort(hostPort)
-		i++
+		i += c.NetConv.HostPort(hostPort, attrs[i:])
 	}
 
 	if peer, peerPort := splitHostPort(req.RemoteAddr); peer != "" {
@@ -422,16 +421,16 @@ func (c *httpConv) ServerRequest(server string, req *http.Request) []attribute.K
 func (c *httpConv) ServerRequestMetrics(server string, req *http.Request) []attribute.KeyValue {
 	/* The following semantic conventions are returned if present:
 	http.scheme             string
-	http.route              string
 	http.method             string
 	http.status_code        int
-	net.host.name           string
-	net.host.port           int
+	net.host.name           string Note: not in http compatibility mode.
+	server.address          string Note: only if in http or http/dup compatibility mode.
+	net.host.port           int    Note: not in http compatibility mode.
+	server.port             int    Note: only if in http or http/dup compatibility mode.
 	net.protocol.name       string Note: not set if the value is "http".
 	net.protocol.version    string
 	*/
 
-	n := 4 // Method, scheme, and host name.
 	var host string
 	var p int
 	if server == "" {
@@ -443,36 +442,31 @@ func (c *httpConv) ServerRequestMetrics(server string, req *http.Request) []attr
 			_, p = splitHostPort(req.Host)
 		}
 	}
-	hostPort := requiredHTTPPort(req.TLS != nil, p)
-	if hostPort > 0 {
-		n++
+
+	const MaxAttributes = 8
+	attrs := make([]attribute.KeyValue, MaxAttributes)
+	i := 0
+	attrs[i] = c.methodMetric(req.Method)
+	i++
+	attrs[i] = c.scheme(req.TLS != nil)
+	i++
+	i += c.NetConv.HostName(host, attrs[i:])
+
+	if hostPort := requiredHTTPPort(req.TLS != nil, p); hostPort > 0 {
+		i += c.NetConv.HostPort(hostPort, attrs[i:])
 	}
 	protoName, protoVersion := netProtocol(req.Proto)
 	if protoName != "" {
-		n++
+		attrs[i] = c.NetConv.NetProtocolName.String(protoName)
+		i++
 	}
 	if protoVersion != "" {
-		n++
-	}
-
-	attrs := make([]attribute.KeyValue, 0, n)
-
-	attrs = append(attrs, c.methodMetric(req.Method))
-	attrs = append(attrs, c.scheme(req.TLS != nil))
-	attrs = append(attrs, c.NetConv.HostName(host)...)
-
-	if hostPort > 0 {
-		attrs = append(attrs, c.NetConv.HostPort(hostPort))
-	}
-	if protoName != "" {
-		attrs = append(attrs, c.NetConv.NetProtocolName.String(protoName))
-	}
-	if protoVersion != "" {
-		attrs = append(attrs, c.NetConv.NetProtocolVersion.String(protoVersion))
+		attrs[i] = c.NetConv.NetProtocolVersion.String(protoVersion)
+		i++
 	}
 
 	// TODO: When we drop go1.20 support use slices.clip().
-	return attrs[:len(attrs):len(attrs)]
+	return attrs[:i:i]
 }
 
 func (c *httpConv) method(method string) attribute.KeyValue {

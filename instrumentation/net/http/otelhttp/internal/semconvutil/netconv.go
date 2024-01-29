@@ -127,12 +127,9 @@ func (c *netConv) Host(address string) []attribute.KeyValue {
 	}
 
 	attrs := make([]attribute.KeyValue, 4)
-	i := c.HostName2(h, attrs)
-	attrs = attrs[:i]
+	i := c.HostName(h, attrs)
 	if p > 0 {
-		attrs = append(attrs, c.HostPort(int(p)))
-		attrs[i] = c.HostPort(int(p))
-		i++
+		i += c.HostPort(int(p), attrs[i:])
 	}
 	// TODO: When we drop go1.20 support use slices.clip().
 	return attrs[:i:i]
@@ -162,11 +159,10 @@ func (c *netConv) Server(address string, ln net.Listener) []attribute.KeyValue {
 	var i int
 	attr := make([]attribute.KeyValue, MaxAttributes)
 	if hostName != "" {
-		i += c.HostName2(hostName, attr[i:])
+		i += c.HostName(hostName, attr[i:])
 		if hostPort > 0 {
 			// Only if net.host.name is set should net.host.port be.
-			attr[i] = c.HostPort(hostPort)
-			i++
+			i += c.HostPort(hostPort, attr[i:])
 		}
 	}
 	if network != "" {
@@ -190,17 +186,7 @@ func (c *netConv) Server(address string, ln net.Listener) []attribute.KeyValue {
 	return attr[:i:i]
 }
 
-func (c *netConv) HostName(name string) []attribute.KeyValue {
-	switch c.compatibility {
-	case compatibilityHttp:
-		return []attribute.KeyValue{c.ServerAddressKey.String(name)}
-	case compatibilityDup:
-		return []attribute.KeyValue{c.NetHostNameKey.String(name), c.ServerAddressKey.String(name)}
-	default:
-		return []attribute.KeyValue{c.NetHostNameKey.String(name)}
-	}
-}
-func (c *netConv) HostName2(name string, dst []attribute.KeyValue) int {
+func (c *netConv) HostName(name string, dst []attribute.KeyValue) int {
 	switch c.compatibility {
 	case compatibilityHttp:
 		copy(dst, []attribute.KeyValue{c.ServerAddressKey.String(name)})
@@ -213,8 +199,17 @@ func (c *netConv) HostName2(name string, dst []attribute.KeyValue) int {
 	return 1
 }
 
-func (c *netConv) HostPort(port int) attribute.KeyValue {
-	return c.NetHostPortKey.Int(port)
+func (c *netConv) HostPort(port int, dst []attribute.KeyValue) int {
+	switch c.compatibility {
+	case compatibilityHttp:
+		copy(dst, []attribute.KeyValue{c.ServerPortKey.Int(port)})
+	case compatibilityDup:
+		copy(dst, []attribute.KeyValue{c.NetHostPortKey.Int(port), c.ServerPortKey.Int(port)})
+		return 2
+	default:
+		copy(dst, []attribute.KeyValue{c.NetHostPortKey.Int(port)})
+	}
+	return 1
 }
 
 // Client returns attributes for a client network connection to address. See

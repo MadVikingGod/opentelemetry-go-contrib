@@ -91,7 +91,7 @@ func TestNetServerTCP(t *testing.T) {
 	got := NetServer("example.com:8080", ln)
 	expected := []attribute.KeyValue{
 		nc.NetHostNameKey.String("example.com"),
-		nc.HostPort(8080),
+		nc.NetHostPortKey.Int(8080),
 		nc.NetTransportTCP,
 		nc.NetSockFamilyKey.String("inet"),
 		nc.NetSockHostAddrKey.String(host),
@@ -104,22 +104,63 @@ func TestNetServerTCP(t *testing.T) {
 func TestNetHost(t *testing.T) {
 	testAddrs(t, []addrTest{
 		{address: "", expected: nil},
-		{address: "192.0.0.1", expected: nc.HostName("192.0.0.1")},
-		{address: "192.0.0.1:9090", expected: append(
-			nc.HostName("192.0.0.1"),
-			nc.HostPort(9090),
-		)},
+		{address: "192.0.0.1", expected: []attribute.KeyValue{nc.NetHostNameKey.String("192.0.0.1")}},
+		{address: "192.0.0.1:9090", expected: []attribute.KeyValue{
+			nc.NetHostNameKey.String("192.0.0.1"),
+			nc.NetHostPortKey.Int(9090),
+		}},
 	}, nc.Host)
 }
 
 func TestNetHostName(t *testing.T) {
-	expected := []attribute.KeyValue{attribute.Key("net.host.name").String(addr)}
-	assert.Equal(t, expected, nc.HostName(addr))
+	tests := []struct {
+		name     string
+		cm       compatibilityMode
+		expected []attribute.KeyValue
+	}{
+		{
+			name:     "default",
+			cm:       compatibilityOld,
+			expected: []attribute.KeyValue{attribute.String("net.host.name", addr)},
+		},
+		{
+			name:     "http",
+			cm:       compatibilityHttp,
+			expected: []attribute.KeyValue{attribute.String("server.address", addr)},
+		},
+		{
+			name: "http/dup",
+			cm:   compatibilityDup,
+			expected: []attribute.KeyValue{
+				attribute.String("server.address", addr),
+				attribute.String("net.host.name", addr),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nc := &netConv{
+				NetHostNameKey:   attribute.Key("net.host.name"),
+				ServerAddressKey: attribute.Key("server.address"),
+				compatibility:    tt.cm,
+			}
+			got := make([]attribute.KeyValue, 2)
+			addr := "127.0.0.1"
+			i := nc.HostName(addr, got)
+			got = got[:i:i]
+			assert.Equal(t, cap(tt.expected), cap(got), "slice capacity")
+			assert.ElementsMatch(t, tt.expected, got)
+		})
+	}
 }
 
 func TestNetHostPort(t *testing.T) {
-	expected := attribute.Key("net.host.port").Int(port)
-	assert.Equal(t, expected, nc.HostPort(port))
+	got := make([]attribute.KeyValue, 2)
+	i := nc.HostPort(port, got)
+	got = got[:i:i]
+	expected := []attribute.KeyValue{attribute.Key("net.host.port").Int(port)}
+	assert.Equal(t, expected, got)
 }
 
 func TestNetClientNilConn(t *testing.T) {
