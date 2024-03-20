@@ -95,3 +95,31 @@ func ServerStatus(code int) (codes.Code, string) {
 	}
 	return codes.Unset, ""
 }
+
+type HTTPClient interface {
+	// TraceRequest returns trace attributes for an HTTP request made by a client.
+	TraceRequest(req *http.Request) []attribute.KeyValue
+
+	// TraceResponse returns trace attributes for an HTTP response received by a
+	// client from a server.
+	TraceResponse(resp *http.Response) []attribute.KeyValue
+
+	// Status returns a span status code and message for an HTTP status code
+	// value received by a client.
+	Status(code int) (codes.Code, string)
+}
+
+func NewHTTPClient() HTTPClient {
+	env := strings.ToLower(os.Getenv("OTEL_HTTP_CLIENT_COMPATIBILITY_MODE"))
+	switch env {
+	// case "http":
+	// 	return newHTTPClient{}
+	case "http/dup":
+		return dupHTTPClient{}
+	default:
+		warnOnce.Do(func() {
+			otel.Handle(errors.New("deprecated: old semantic conventions are being used. Use the environment variable OTEL_HTTP_CLIENT_COMPATIBILITY_MODE to opt into the new conventions. Setting it to `http/dup` will provide combined old-and-new attributes. Setting it to `http` will switch directly to the new attributes. This will be removed in a future release"))
+		})
+		return oldHTTPClient{}
+	}
+}

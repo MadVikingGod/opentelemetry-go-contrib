@@ -111,3 +111,34 @@ func TestDupTraceResponse(t *testing.T) {
 	}
 	testTraceResponse(t, serv, want)
 }
+
+func TestDupClient(t *testing.T) {
+	t.Setenv("OTEL_HTTP_CLIENT_COMPATIBILITY_MODE", "http/dup")
+	client := NewHTTPClient()
+	want := []attribute.KeyValue{
+		// Old Attributes
+		attribute.String("http.method", "PoST"),
+		attribute.String("http.url", "https://fake.url.local:8080/path"),
+		attribute.String("net.peer.name", "fake.url.local"),
+		attribute.Int("net.peer.port", 8080),
+		attribute.Int64("http.request_content_length", 4),
+		// New Attributes
+		attribute.String("http.request.method", "POST"),
+		attribute.String("http.request.method_original", "PoST"),
+		attribute.String("network.peer.address", "fake.url.local"),
+		attribute.String("server.address", "fake.url.local"),
+		attribute.Int("network.peer.port", 8080),
+		attribute.Int("server.port", 8080),
+		attribute.String("url.full", "https://fake.url.local:8080/path"),
+		attribute.Int("http.request.body.size", 4),
+		// Common Attributes
+		attribute.String("user_agent.original", "http-test-client"),
+	}
+	testClientTraceRequest(t, client, want)
+
+	// want = []attribute.KeyValue{
+	// 	attribute.Int64("http.status_code", 201),
+	// 	attribute.Int64("http.response_content_length", 397),
+	// }
+	// testClientTraceResponse(t, client, want)
+}

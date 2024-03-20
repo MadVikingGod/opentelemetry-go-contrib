@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -90,4 +91,28 @@ func testTraceResponse(t *testing.T, serv HTTPServer, want []attribute.KeyValue)
 		WriteError: fmt.Errorf("write error"),
 	}
 	assert.ElementsMatch(t, want, serv.TraceResponse(resp))
+}
+
+func testClientTraceRequest(t *testing.T, client HTTPClient, want []attribute.KeyValue) {
+	t.Helper()
+
+	req, err := http.NewRequest("PoST", "https://usr:pass@fake.url.local:8080/path", strings.NewReader("Body"))
+	req.Header.Add("User-Agent", "http-test-client")
+
+	require.NoError(t, err)
+
+	got := client.TraceRequest(req)
+	assert.ElementsMatch(t, want, got)
+	assert.Equal(t, cap(want), cap(got))
+}
+
+func testClientTraceResponse(t *testing.T, client HTTPClient, want []attribute.KeyValue) {
+	t.Helper()
+
+	const stat, n = 201, 397
+	resp := &http.Response{
+		StatusCode:    stat,
+		ContentLength: n,
+	}
+	assert.ElementsMatch(t, want, client.TraceResponse(resp))
 }

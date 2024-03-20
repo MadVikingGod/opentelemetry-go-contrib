@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	semconvOld "go.opentelemetry.io/otel/semconv/v1.20.0"
 	semconvNew "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
@@ -192,4 +193,97 @@ func (d dupHTTPServer) TraceResponse(resp ResponseTelemetry) []attribute.KeyValu
 // Route returns the attribute for the route.
 func (d dupHTTPServer) Route(route string) attribute.KeyValue {
 	return semconvNew.HTTPRoute(route)
+}
+
+type dupHTTPClient struct{}
+
+var _ HTTPClient = dupHTTPClient{}
+
+// TraceRequest returns trace attributes for an HTTP request made by a client.
+func (d dupHTTPClient) TraceRequest(req *http.Request) []attribute.KeyValue {
+	const MaxAttributes = 14
+	attrs := make([]attribute.KeyValue, MaxAttributes)
+	i := d.method(req.Method, attrs) // 3 max
+
+	var host string
+	var port int
+	if req.URL != nil {
+		host, port = splitHostPort(req.URL.Host)
+	}
+	if host == "" && port <= 0 {
+		host, port = splitHostPort(req.Header.Get("Host"))
+	}
+	port = requiredHTTPPort(req.URL != nil && req.URL.Scheme == "https", port)
+
+	// 3 attributes
+	attrs[i] = semconvOld.NetPeerName(host)
+	attrs[i+1] = semconvNew.NetworkPeerAddress(host)
+	attrs[i+2] = semconvNew.ServerAddress(host)
+	i += 3
+
+	// Max 3 attributes
+	if port > 0 {
+		attrs[i] = semconvOld.NetPeerPort(port)
+		attrs[i+1] = semconvNew.NetworkPeerPort(port)
+		attrs[i+2] = semconvNew.ServerPort(port)
+		i += 3
+	}
+
+	if req.URL != nil {
+		// Remove any username/password info that may be in the URL.
+		userinfo := req.URL.User
+		req.URL.User = nil
+		url := req.URL.String()
+		attrs[i] = semconvOld.HTTPURL(url)
+		attrs[i+1] = semconvNew.URLFull(url)
+		i += 2
+		// Restore any username/password info that was removed.
+		req.URL.User = userinfo
+	}
+	if req.ContentLength > 0 {
+		attrs[i] = semconvOld.HTTPRequestContentLength(int(req.ContentLength))
+		attrs[i+1] = semconvNew.HTTPRequestBodySize(int(req.ContentLength))
+		i += 2
+	}
+	if req.UserAgent() != "" {
+		// These are the same
+		attrs[i] = semconvNew.UserAgentOriginal(req.UserAgent())
+		i++
+	}
+
+	return slices.Clip(attrs[:i])
+}
+
+// TraceResponse returns trace attributes for an HTTP response received by a
+// client from a server.
+func (d dupHTTPClient) TraceResponse(resp *http.Response) []attribute.KeyValue {
+	panic("not implemented") // TODO: Implement
+}
+
+// Status returns a span status code and message for an HTTP status code
+// value received by a client.
+func (d dupHTTPClient) Status(code int) (codes.Code, string) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (d dupHTTPClient) method(method string, attrs []attribute.KeyValue) int {
+	if method == "" {
+		attrs[0] = semconvOld.HTTPMethod(http.MethodGet)
+		attrs[1] = semconvNew.HTTPRequestMethodOther
+		return 2
+	}
+	attrs[0] = semconvOld.HTTPMethod(method)
+	if attr, ok := methodLookup[method]; ok {
+		attrs[1] = attr
+		return 2
+	}
+
+	if attr, ok := methodLookup[strings.ToUpper(method)]; ok {
+		attrs[1] = attr
+	} else {
+		// If the Original method is not a standard HTTP method fallback to Other
+		attrs[1] = semconvNew.HTTPRequestMethodOther
+	}
+	attrs[2] = semconvNew.HTTPRequestMethodOriginal(method)
+	return 3
 }

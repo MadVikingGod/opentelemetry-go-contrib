@@ -39,6 +39,7 @@ func TestV120TraceRequest(t *testing.T) {
 		}
 	}
 	testTraceRequest(t, serv, want)
+
 }
 
 func TestV120TraceResponse(t *testing.T) {
@@ -53,4 +54,25 @@ func TestV120TraceResponse(t *testing.T) {
 		attribute.Int("http.status_code", 200),
 	}
 	testTraceResponse(t, serv, want)
+}
+
+func TestV120Client(t *testing.T) {
+	// Anything but "http" or "http/dup" works
+	t.Setenv("OTEL_HTTP_CLIENT_COMPATIBILITY_MODE", "old")
+	client := NewHTTPClient()
+	want := []attribute.KeyValue{
+		attribute.String("http.method", "PoST"),
+		attribute.String("http.url", "https://fake.url.local:8080/path"),
+		attribute.String("net.peer.name", "fake.url.local"),
+		attribute.Int("net.peer.port", 8080),
+		attribute.Int64("http.request_content_length", 4),
+		attribute.String("user_agent.original", "http-test-client"),
+	}
+	testClientTraceRequest(t, client, want)
+
+	want = []attribute.KeyValue{
+		attribute.Int64("http.status_code", 201),
+		attribute.Int64("http.response_content_length", 397),
+	}
+	testClientTraceResponse(t, client, want)
 }

@@ -20,6 +20,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/internal/semconvutil"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 )
 
@@ -83,4 +84,25 @@ func (o oldHTTPServer) Route(route string) attribute.KeyValue {
 // This is a temporary function needed by metrics.  This will be removed when MetricsRequest is added.
 func HTTPStatusCode(status int) attribute.KeyValue {
 	return semconv.HTTPStatusCode(status)
+}
+
+type oldHTTPClient struct{}
+
+var _ HTTPClient = oldHTTPClient{}
+
+// TraceRequest returns trace attributes for an HTTP request made by a client.
+func (o oldHTTPClient) TraceRequest(req *http.Request) []attribute.KeyValue {
+	return semconvutil.HTTPClientRequest(req)
+}
+
+// TraceResponse returns trace attributes for an HTTP response received by a
+// client from a server.
+func (o oldHTTPClient) TraceResponse(resp *http.Response) []attribute.KeyValue {
+	return semconvutil.HTTPClientResponse(resp)
+}
+
+// Status returns a span status code and message for an HTTP status code
+// value received by a client.
+func (o oldHTTPClient) Status(code int) (codes.Code, string) {
+	return semconvutil.HTTPClientStatus(code)
 }
