@@ -277,3 +277,27 @@ func TestParseTraceStateExtra(t *testing.T) {
 		})
 	}
 }
+
+func TestPraseNumberOverflow(t *testing.T) {
+	testCases := []string{
+		"invalid",
+		"-2345",
+		strconv.Itoa(1<<63 - 1),
+	}
+
+	for _, tc := range testCases {
+		_, err := parseNumber("key", tc, uint8(1<<8-1))
+		require.Error(t, err)
+	}
+}
+
+func TestParseNumber(t *testing.T) {
+	var i uint8
+	const max = 63 // This is the largest value used in code.
+	for ; i <= max; i++ {
+		s := strconv.Itoa(int(i))
+		v, err := parseNumber("key", s, max)
+		require.NoError(t, err)
+		require.Equal(t, i, v)
+	}
+}
