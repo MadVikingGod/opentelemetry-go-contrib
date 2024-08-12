@@ -79,9 +79,9 @@ func HTTPStatusCode(status int) attribute.KeyValue {
 
 // Server HTTP metrics.
 const (
-	serverRequestSize  = "http.server.request.size"  // Incoming request bytes total
-	serverResponseSize = "http.server.response.size" // Incoming response bytes total
-	serverDuration     = "http.server.duration"      // Incoming end to end duration, milliseconds
+	oldServerRequestSize  = "http.server.request.size"  // Incoming request bytes total
+	oldServerResponseSize = "http.server.response.size" // Incoming response bytes total
+	oldServerDuration     = "http.server.duration"      // Incoming end to end duration, milliseconds
 )
 
 func (h oldHTTPServer) createMeasures(meter metric.Meter) (metric.Int64Counter, metric.Int64Counter, metric.Float64Histogram) {
@@ -90,21 +90,21 @@ func (h oldHTTPServer) createMeasures(meter metric.Meter) (metric.Int64Counter, 
 	}
 	var err error
 	requestBytesCounter, err := meter.Int64Counter(
-		serverRequestSize,
+		oldServerRequestSize,
 		metric.WithUnit("By"),
 		metric.WithDescription("Measures the size of HTTP request messages."),
 	)
 	handleErr(err)
 
 	responseBytesCounter, err := meter.Int64Counter(
-		serverResponseSize,
+		oldServerResponseSize,
 		metric.WithUnit("By"),
 		metric.WithDescription("Measures the size of HTTP response messages."),
 	)
 	handleErr(err)
 
 	serverLatencyMeasure, err := meter.Float64Histogram(
-		serverDuration,
+		oldServerDuration,
 		metric.WithUnit("ms"),
 		metric.WithDescription("Measures the duration of inbound HTTP requests."),
 	)

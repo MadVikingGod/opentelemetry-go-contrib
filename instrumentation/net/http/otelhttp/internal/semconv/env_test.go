@@ -74,10 +74,30 @@ func (t *testInst) Record(ctx context.Context, value float64, options ...metric.
 	t.attributes = attr.ToSlice()
 }
 
-func NewTestHTTPServer() HTTPServer {
+type testIntHistogram struct {
+	embedded.Int64Histogram
+
+	value      int64
+	attributes []attribute.KeyValue
+}
+
+func (t *testIntHistogram) Record(ctx context.Context, value int64, options ...metric.RecordOption) {
+	t.value = value
+	cfg := metric.NewRecordConfig(options)
+	attr := cfg.Attributes()
+	t.attributes = attr.ToSlice()
+}
+
+func NewTestHTTPServer(duplicate bool) HTTPServer {
 	return HTTPServer{
-		requestBytesCounter:  &testInst{},
-		responseBytesCounter: &testInst{},
+		oldRequestBytesCounter:  &testInst{},
+		oldResponseBytesCounter: &testInst{},
+		oldServerLatencyMeasure: &testInst{},
+
+		requestBytesCounter:  &testIntHistogram{},
+		responseBytesCounter: &testIntHistogram{},
 		serverLatencyMeasure: &testInst{},
+
+		duplicate: duplicate,
 	}
 }

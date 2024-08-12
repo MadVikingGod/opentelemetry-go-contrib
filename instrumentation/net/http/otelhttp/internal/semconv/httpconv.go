@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	semconvNew "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
@@ -197,6 +200,114 @@ func (n newHTTPServer) ResponseTraceAttrs(resp ResponseTelemetry) []attribute.Ke
 // Route returns the attribute for the route.
 func (n newHTTPServer) Route(route string) attribute.KeyValue {
 	return semconvNew.HTTPRoute(route)
+}
+
+// Server HTTP metrics.
+const (
+	serverRequestSize  = "http.server.request.body.size"  // Incoming request bytes total
+	serverResponseSize = "http.server.response.body.size" // Incoming response bytes total
+	serverDuration     = "http.server.request.duration"   // Incoming end to end duration, milliseconds
+)
+
+func (n newHTTPServer) createMeasures(meter metric.Meter) (metric.Int64Histogram, metric.Int64Histogram, metric.Float64Histogram) {
+	if meter == nil {
+		return noop.Int64Histogram{}, noop.Int64Histogram{}, noop.Float64Histogram{}
+	}
+	var err error
+	requestBytesCounter, err := meter.Int64Histogram(
+		serverRequestSize,
+		metric.WithUnit("By"),
+		metric.WithDescription("Size of HTTP server request bodies."),
+	)
+	handleErr(err)
+
+	responseBytesCounter, err := meter.Int64Histogram(
+		serverResponseSize,
+		metric.WithUnit("By"),
+		metric.WithDescription("Size of HTTP server response bodies."),
+	)
+	handleErr(err)
+
+	serverLatencyMeasure, err := meter.Float64Histogram(
+		serverDuration,
+		metric.WithUnit("s"),
+		metric.WithDescription("Duration of HTTP server requests."),
+	)
+	handleErr(err)
+
+	return requestBytesCounter, responseBytesCounter, serverLatencyMeasure
+}
+
+func (n newHTTPServer) MetricAttributes(server string, req *http.Request, statusCode int, additionalAttributes []attribute.KeyValue) []attribute.KeyValue {
+	count := len(additionalAttributes) + 3
+	var host string
+	var p int
+	if server == "" {
+		host, p = splitHostPort(req.Host)
+	} else {
+		// Prioritize the primary server name.
+		host, p = splitHostPort(server)
+		if p < 0 {
+			_, p = splitHostPort(req.Host)
+		}
+	}
+	hostPort := requiredHTTPPort(req.TLS != nil, p)
+	if hostPort > 0 {
+		count++
+	}
+	protoName, protoVersion := netProtocol(req.Proto)
+	if protoName != "" {
+		count++
+	}
+	if protoVersion != "" {
+		count++
+	}
+
+	if statusCode > 0 {
+		count++
+	}
+
+	attributes := slices.Grow(additionalAttributes, count)
+	attributes = append(attributes,
+		n.methodMetric(req.Method),
+		n.scheme(req.TLS != nil),
+		semconvNew.ServerAddress(host))
+
+	if hostPort > 0 {
+		attributes = append(attributes, semconvNew.ServerPort(hostPort))
+	}
+	if protoName != "" {
+		attributes = append(attributes, semconvNew.NetworkProtocolName(protoName))
+	}
+	if protoVersion != "" {
+		attributes = append(attributes, semconvNew.NetworkProtocolVersion(protoVersion))
+	}
+
+	if statusCode > 0 {
+		attributes = append(attributes, semconvNew.HTTPResponseStatusCode(statusCode))
+	}
+	return attributes
+}
+
+func (n newHTTPServer) methodMetric(method string) attribute.KeyValue {
+	method = strings.ToUpper(method)
+	a, ok := methodMap[method]
+	if !ok {
+		return semconvNew.HTTPRequestMethodOther
+	}
+	return a
+}
+
+var methodMap = map[string]attribute.KeyValue{
+	http.MethodConnect: semconvNew.HTTPRequestMethodConnect,
+	http.MethodDelete:  semconvNew.HTTPRequestMethodDelete,
+	http.MethodGet:     semconvNew.HTTPRequestMethodGet,
+	http.MethodHead:    semconvNew.HTTPRequestMethodHead,
+	http.MethodOptions: semconvNew.HTTPRequestMethodOptions,
+	http.MethodPatch:   semconvNew.HTTPRequestMethodPatch,
+	http.MethodPost:    semconvNew.HTTPRequestMethodPost,
+	http.MethodPut:     semconvNew.HTTPRequestMethodPut,
+	http.MethodTrace:   semconvNew.HTTPRequestMethodTrace,
 }
 
 type newHTTPClient struct{}

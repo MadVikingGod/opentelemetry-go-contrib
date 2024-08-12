@@ -4,6 +4,7 @@
 package semconv
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -153,6 +154,61 @@ func TestNewTraceRequest_Client(t *testing.T) {
 	}
 	client := NewHTTPClient()
 	assert.ElementsMatch(t, want, client.RequestTraceAttrs(req))
+}
+
+func TestRecordMetrics(t *testing.T) {
+	server := NewTestHTTPServer(true)
+	req, err := http.NewRequest("POST", "http://example.com", nil)
+	assert.NoError(t, err)
+
+	server.RecordMetrics(context.Background(), MetricData{
+		ServerName: "stuff",
+		Req:        req,
+		StatusCode: 301,
+		AdditionalAttributes: []attribute.KeyValue{
+			attribute.String("key", "value"),
+		},
+
+		RequestSize:  100,
+		ResponseSize: 200,
+		ElapsedTime:  300,
+	})
+
+	assert.Equal(t, int64(100), server.oldRequestBytesCounter.(*testInst).intValue)
+	assert.Equal(t, int64(200), server.oldResponseBytesCounter.(*testInst).intValue)
+	assert.Equal(t, float64(300), server.oldServerLatencyMeasure.(*testInst).floatValue)
+
+	assert.Equal(t, int64(100), server.requestBytesCounter.(*testIntHistogram).value)
+	assert.Equal(t, int64(200), server.responseBytesCounter.(*testIntHistogram).value)
+	assert.Equal(t, float64(300), server.serverLatencyMeasure.(*testInst).floatValue)
+
+	wantOld := []attribute.KeyValue{
+		attribute.String("http.scheme", "http"),
+		attribute.String("http.method", "POST"),
+		attribute.Int64("http.status_code", 301),
+		attribute.String("key", "value"),
+		attribute.String("net.host.name", "stuff"),
+		attribute.String("net.protocol.name", "http"),
+		attribute.String("net.protocol.version", "1.1"),
+	}
+
+	assert.ElementsMatch(t, wantOld, server.oldRequestBytesCounter.(*testInst).attributes)
+	assert.ElementsMatch(t, wantOld, server.oldResponseBytesCounter.(*testInst).attributes)
+	assert.ElementsMatch(t, wantOld, server.oldServerLatencyMeasure.(*testInst).attributes)
+
+	want := []attribute.KeyValue{
+		attribute.String("http.request.method", "POST"),
+		attribute.Int64("http.response.status_code", 301),
+		attribute.String("key", "value"),
+		attribute.String("server.address", "stuff"),
+		attribute.String("network.protocol.name", "http"),
+		attribute.String("network.protocol.version", "1.1"),
+		attribute.String("url.scheme", "http"),
+	}
+
+	assert.ElementsMatch(t, want, server.requestBytesCounter.(*testIntHistogram).attributes)
+	assert.ElementsMatch(t, want, server.responseBytesCounter.(*testIntHistogram).attributes)
+	assert.ElementsMatch(t, want, server.serverLatencyMeasure.(*testInst).attributes)
 }
 
 func TestNewTraceResponse_Client(t *testing.T) {

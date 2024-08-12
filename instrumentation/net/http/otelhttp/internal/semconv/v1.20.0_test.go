@@ -88,7 +88,7 @@ func TestV120TraceResponse(t *testing.T) {
 }
 
 func TestV120RecordMetrics(t *testing.T) {
-	server := NewTestHTTPServer()
+	server := NewTestHTTPServer(false)
 	req, err := http.NewRequest("POST", "http://example.com", nil)
 	assert.NoError(t, err)
 
@@ -105,9 +105,9 @@ func TestV120RecordMetrics(t *testing.T) {
 		ElapsedTime:  300,
 	})
 
-	assert.Equal(t, int64(100), server.requestBytesCounter.(*testInst).intValue)
-	assert.Equal(t, int64(200), server.responseBytesCounter.(*testInst).intValue)
-	assert.Equal(t, float64(300), server.serverLatencyMeasure.(*testInst).floatValue)
+	assert.Equal(t, int64(100), server.oldRequestBytesCounter.(*testInst).intValue)
+	assert.Equal(t, int64(200), server.oldResponseBytesCounter.(*testInst).intValue)
+	assert.Equal(t, float64(300), server.oldServerLatencyMeasure.(*testInst).floatValue)
 
 	want := []attribute.KeyValue{
 		attribute.String("http.scheme", "http"),
@@ -119,9 +119,9 @@ func TestV120RecordMetrics(t *testing.T) {
 		attribute.String("net.protocol.version", "1.1"),
 	}
 
-	assert.ElementsMatch(t, want, server.requestBytesCounter.(*testInst).attributes)
-	assert.ElementsMatch(t, want, server.responseBytesCounter.(*testInst).attributes)
-	assert.ElementsMatch(t, want, server.serverLatencyMeasure.(*testInst).attributes)
+	assert.ElementsMatch(t, want, server.oldRequestBytesCounter.(*testInst).attributes)
+	assert.ElementsMatch(t, want, server.oldResponseBytesCounter.(*testInst).attributes)
+	assert.ElementsMatch(t, want, server.oldServerLatencyMeasure.(*testInst).attributes)
 }
 
 func TestV120ClientRequest(t *testing.T) {

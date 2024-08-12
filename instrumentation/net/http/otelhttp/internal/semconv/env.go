@@ -27,8 +27,13 @@ type HTTPServer struct {
 	duplicate bool
 
 	// Old metrics
-	requestBytesCounter  metric.Int64Counter
-	responseBytesCounter metric.Int64Counter
+	oldRequestBytesCounter  metric.Int64Counter
+	oldResponseBytesCounter metric.Int64Counter
+	oldServerLatencyMeasure metric.Float64Histogram
+
+	// Old metrics
+	requestBytesCounter  metric.Int64Histogram
+	responseBytesCounter metric.Int64Histogram
 	serverLatencyMeasure metric.Float64Histogram
 }
 
@@ -92,10 +97,11 @@ type MetricData struct {
 	RequestSize  int64
 	ResponseSize int64
 	ElapsedTime  float64
+	ErrorType    string
 }
 
 func (s HTTPServer) RecordMetrics(ctx context.Context, md MetricData) {
-	if s.requestBytesCounter == nil || s.responseBytesCounter == nil || s.serverLatencyMeasure == nil {
+	if s.oldRequestBytesCounter == nil || s.oldResponseBytesCounter == nil || s.oldServerLatencyMeasure == nil {
 		// This will happen if an HTTPServer{} is used insted of NewHTTPServer.
 		return
 	}
@@ -103,11 +109,17 @@ func (s HTTPServer) RecordMetrics(ctx context.Context, md MetricData) {
 	attributes := oldHTTPServer{}.MetricAttributes(md.ServerName, md.Req, md.StatusCode, md.AdditionalAttributes)
 	o := metric.WithAttributeSet(attribute.NewSet(attributes...))
 	addOpts := []metric.AddOption{o} // Allocate vararg slice once.
-	s.requestBytesCounter.Add(ctx, md.RequestSize, addOpts...)
-	s.responseBytesCounter.Add(ctx, md.ResponseSize, addOpts...)
-	s.serverLatencyMeasure.Record(ctx, md.ElapsedTime, o)
+	s.oldRequestBytesCounter.Add(ctx, md.RequestSize, addOpts...)
+	s.oldResponseBytesCounter.Add(ctx, md.ResponseSize, addOpts...)
+	s.oldServerLatencyMeasure.Record(ctx, md.ElapsedTime, o)
 
-	// TODO: Duplicate Metrics
+	if s.duplicate && s.requestBytesCounter != nil && s.responseBytesCounter != nil && s.serverLatencyMeasure != nil {
+		attributes = newHTTPServer{}.MetricAttributes(md.ServerName, md.Req, md.StatusCode, md.AdditionalAttributes)
+		opt := []metric.RecordOption{metric.WithAttributeSet(attribute.NewSet(attributes...))}
+		s.requestBytesCounter.Record(ctx, md.RequestSize, opt...)
+		s.responseBytesCounter.Record(ctx, md.ResponseSize, opt...)
+		s.serverLatencyMeasure.Record(ctx, md.ElapsedTime, opt...)
+	}
 }
 
 func NewHTTPServer(meter metric.Meter) HTTPServer {
@@ -116,7 +128,11 @@ func NewHTTPServer(meter metric.Meter) HTTPServer {
 	server := HTTPServer{
 		duplicate: duplicate,
 	}
-	server.requestBytesCounter, server.responseBytesCounter, server.serverLatencyMeasure = oldHTTPServer{}.createMeasures(meter)
+	server.oldRequestBytesCounter, server.oldResponseBytesCounter, server.oldServerLatencyMeasure = oldHTTPServer{}.createMeasures(meter)
+	if duplicate {
+		server.requestBytesCounter, server.responseBytesCounter, server.serverLatencyMeasure = newHTTPServer{}.createMeasures(meter)
+	}
+
 	return server
 }
 
